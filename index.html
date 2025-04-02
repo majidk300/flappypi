@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pi Coin Jump</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+            background-color: skyblue;
+            overflow: hidden;
+            position: fixed;
+            touch-action: manipulation;
+        }
+        #gameContainer {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            max-width: 500px;
+            max-height: 800px;
+            margin: auto;
+            touch-action: manipulation;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background-color: lightblue;
+            touch-action: manipulation;
+        }
+        #startScreen, #gameOverScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        #gameOverScreen {
+            display: none;
+        }
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 18px;
+            background-color: #F7931A;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover {
+            background-color: #e07e0c;
+            transform: scale(1.05);
+        }
+        .score-display {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            font-family: Arial, sans-serif;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            color: #F7931A;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        p {
+            font-size: 1.2rem;
+            margin-bottom: 10px;
+        }
+        #muteButton {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 5px 10px;
+            font-size: 14px;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div class="score-display" id="scoreDisplay"> $ 0.0</div>
+        <button id="muteButton">Mute</button>
+        <div id="startScreen">
+            <h1>Pi Coin Jump</h1>
+            <p>Tap anywhere or press SPACE to jump</p>
+            <p style="color: orange;">(If you are looking for quick money, look elsewhere...)</p>
+            <button id="startButton">Start Game</button>
+        </div>
+        <div id="gameOverScreen">
+            <h1>Game Over</h1>
+            <p id="finalScore">Score: $ 0.0</p>
+            <p id="highScore">Best: $ 0.0</p>
+            <button id="restartButton">Play Again</button>
+        </div>
+    </div>
+    
+    <audio id="backgroundMusic" loop>
+        <source src="pi_audio.mp3" type="audio/mpeg">
+        Your browser does not support the audio element.
+    </audio>
+    
+    <script>
+        // Game elements
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const gameContainer = document.getElementById("gameContainer");
+        const startScreen = document.getElementById("startScreen");
+        const gameOverScreen = document.getElementById("gameOverScreen");
+        const startButton = document.getElementById("startButton");
+        const restartButton = document.getElementById("restartButton");
+        const scoreDisplay = document.getElementById("scoreDisplay");
+        const finalScore = document.getElementById("finalScore");
+        const highScoreDisplay = document.getElementById("highScore");
+        const backgroundMusic = document.getElementById("backgroundMusic");
+        const muteButton = document.getElementById("muteButton");
+        
+        // Game variables
+        let bird, candles, gameOver, score, highScore, candleSpeed, gameStarted;
+        let canvasWidth, canvasHeight;
+        let lastCandlePairId = 0;
+        let scoredPairs = new Set();
+        let animationFrameId;
+        let gapSize = 0.24;
+        let isMuted = false;
+        
+        // Constants for consistent physics
+        const PHYSICS = {
+            GRAVITY: 0.4,
+            LIFT: -7,
+            MAX_ROTATION: 0.3,
+            ROTATION_SPEED: 0.03,
+            INITIAL_CANDLE_SPEED: 2,
+            CANDLE_SPEED_INCREMENT: 0.1,
+            MIN_GAP_SIZE: 0.2,
+            GAP_DECREASE_RATE: 0.98
+        };
+        
+        // Initialize game with consistent settings
+        function initGame() {
+            // Set canvas size to match container
+            resizeCanvas();
+            
+            // Reset game parameters to initial values
+            gapSize = 0.24;
+            candleSpeed = PHYSICS.INITIAL_CANDLE_SPEED;
+            gameOver = false;
+            gameStarted = false;
+            score = 0;
+            lastCandlePairId = 0;
+            scoredPairs = new Set();
+            
+            // High score persists
+            highScore = parseFloat(localStorage.getItem('piCoinJumpHighScore')) || 0;
+            
+            // Initialize bird with consistent physics
+            bird = {
+                x: canvasWidth * 0.2,
+                y: canvasHeight / 2,
+                width: canvasWidth * 0.08,
+                height: canvasWidth * 0.08,
+                velocity: 0,
+                gravity: PHYSICS.GRAVITY,
+                lift: PHYSICS.LIFT,
+                rotation: 0
+            };
+            
+            candles = [];
+            scoreDisplay.textContent = "$ 0.0";
+            highScoreDisplay.textContent = `Best: $ ${highScore.toFixed(1)}`;
+        }
+        
+        // Handle canvas resizing
+        function resizeCanvas() {
+            canvasWidth = gameContainer.clientWidth;
+            canvasHeight = gameContainer.clientHeight;
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+        }
+        
+        // Draw Pi coin logo with rotation
+        function drawBird() {
+            ctx.save();
+            ctx.translate(
+                bird.x + bird.width / 2,
+                bird.y + bird.height / 2
+            );
+            ctx.rotate(bird.rotation);
+            
+            // Draw the Pi coin circle
+            ctx.fillStyle = "#F7931A";
+            ctx.beginPath();
+            ctx.arc(
+                0,
+                0,
+                bird.width / 2,
+                0,
+                Math.PI * 2
+            );
+            ctx.fill();
+            
+            // Draw the Pi symbol
+            ctx.fillStyle = "white";
+            ctx.font = `bold ${bird.width * 0.5}px Arial`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(
+                "π",
+                0,
+                0
+            );
+            
+            ctx.restore();
+            
+            // Update rotation based on velocity
+            bird.rotation += bird.velocity * PHYSICS.ROTATION_SPEED;
+            
+            // Limit rotation
+            if (bird.rotation > PHYSICS.MAX_ROTATION) bird.rotation = PHYSICS.MAX_ROTATION;
+            if (bird.rotation < -PHYSICS.MAX_ROTATION) bird.rotation = -PHYSICS.MAX_ROTATION;
+        }
+        
+        // Draw candlesticks (red and green)
+        function drawCandles() {
+            candles.forEach(candle => {
+                // Draw candle body (wider than the wick)
+                ctx.fillStyle = candle.color;
+                ctx.fillRect(
+                    candle.x - candle.width/2, 
+                    candle.y, 
+                    candle.width, 
+                    candle.height
+                );
+                
+                // Draw candle wick (thinner line in the middle)
+                ctx.fillStyle = "#333";
+                ctx.fillRect(
+                    candle.x - candle.wickWidth/2,
+                    candle.y - candle.wickHeight,
+                    candle.wickWidth,
+                    candle.wickHeight
+                );
+                
+                // Draw bottom wick if it's a top candle
+                if (candle.isTop) {
+                    ctx.fillRect(
+                        candle.x - candle.wickWidth/2,
+                        candle.y + candle.height,
+                        candle.wickWidth,
+                        candle.wickHeight
+                    );
+                }
+            });
+        }
+        
+        // Update game state with consistent physics
+        function updateGame() {
+            if (gameOver || !gameStarted) return;
+            
+            // Apply consistent gravity
+            bird.velocity += bird.gravity;
+            bird.y += bird.velocity;
+            
+            // Check if bird hits ground or ceiling
+            if (bird.y + bird.height > canvasHeight) {
+                bird.y = canvasHeight - bird.height;
+                endGame();
+                return;
+            }
+            if (bird.y < 0) {
+                bird.y = 0;
+                endGame();
+                return;
+            }
+            
+            // Update candles and check for scoring
+            candles.forEach(candle => {
+                candle.x -= candleSpeed;
+                
+                // Check if bird has passed this candle (for scoring)
+                if (!candle.scored && bird.x > candle.x + candle.width/2) {
+                    candle.scored = true;
+                    if (!scoredPairs.has(candle.pairId)) {
+                        scoredPairs.add(candle.pairId);
+                        score += 0.1;
+                        scoreDisplay.textContent = `$ ${score.toFixed(1)}`;
+                        
+                        // Consistent difficulty increase
+                        if (Math.floor(score) % 5 === 0 && score % 1 === 0) {
+                            candleSpeed += PHYSICS.CANDLE_SPEED_INCREMENT;
+                        }
+                        // Gradual gap reduction
+                        if (Math.floor(score) % 10 === 0 && score % 1 === 0 && gapSize > PHYSICS.MIN_GAP_SIZE) {
+                            gapSize *= PHYSICS.GAP_DECREASE_RATE;
+                        }
+                    }
+                }
+                
+                // Check collision with bird
+                if (
+                    bird.x < candle.x + candle.width/2 &&
+                    bird.x + bird.width > candle.x - candle.width/2 &&
+                    bird.y < candle.y + candle.height &&
+                    bird.y + bird.height > candle.y
+                ) {
+                    endGame();
+                    return;
+                }
+            });
+            
+            // Remove candles that are off screen
+            candles = candles.filter(candle => candle.x + candle.width/2 > 0);
+            
+            // Add new candles when needed
+            if (candles.length === 0 || candles[candles.length - 1].x < canvasWidth - canvasWidth * 0.5) {
+                addCandlePair();
+            }
+        }
+        
+        // Add a new pair of candles (red and green)
+        function addCandlePair() {
+            const minHeight = canvasHeight * 0.1;
+            const maxHeight = canvasHeight * 0.6;
+            
+            // Random height for top candle
+            const topHeight = Math.floor(Math.random() * (maxHeight - minHeight)) + minHeight;
+            const bottomY = topHeight + (canvasHeight * gapSize);
+            
+            // Candle properties - increased width here
+            const candleWidth = canvasWidth * 0.08; // Changed from 0.06 to 0.08
+            const wickWidth = candleWidth * 0.2;
+            const wickHeight = canvasHeight * 0.03;
+            const pairId = ++lastCandlePairId;
+            
+            // Randomly decide colors (green is bullish, red is bearish)
+            const colors = ["#0F0", "#F00"];
+            const topColor = colors[Math.floor(Math.random() * colors.length)];
+            const bottomColor = colors[Math.floor(Math.random() * colors.length)];
+            
+            // Top candle (hanging down)
+            candles.push({ 
+                x: canvasWidth, 
+                y: 0, 
+                width: candleWidth,
+                height: topHeight,
+                wickWidth: wickWidth,
+                wickHeight: wickHeight,
+                color: topColor,
+                pairId: pairId,
+                scored: false,
+                isTop: true
+            });
+            
+            // Bottom candle (growing up)
+            candles.push({ 
+                x: canvasWidth, 
+                y: bottomY, 
+                width: candleWidth,
+                height: canvasHeight - bottomY,
+                wickWidth: wickWidth,
+                wickHeight: wickHeight,
+                color: bottomColor,
+                pairId: pairId,
+                scored: false,
+                isTop: false
+            });
+        }
+        
+        // End game
+        function endGame() {
+            gameOver = true;
+            gameStarted = false;
+            finalScore.textContent = `Score: $ ${score.toFixed(1)}`;
+            
+            // Update high score
+            if (score > highScore) {
+                highScore = score;
+                highScoreDisplay.textContent = `Best: $ ${highScore.toFixed(1)}`;
+                localStorage.setItem('piCoinJumpHighScore', highScore);
+            }
+            
+            gameOverScreen.style.display = "flex";
+            cancelAnimationFrame(animationFrameId);
+            
+            // Pause background music
+            backgroundMusic.pause();
+            backgroundMusic.currentTime = 0; // Rewind to start
+        }
+        
+        // Main game loop
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+            
+            if (gameStarted) {
+                drawBird();
+                drawCandles();
+                updateGame();
+            }
+            
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+        
+        // Jump function with consistent physics
+        function jump() {
+            if (!gameStarted && !gameOver) {
+                startGame();
+            } else if (gameStarted && !gameOver) {
+                bird.velocity = bird.lift;
+                bird.rotation = -PHYSICS.MAX_ROTATION;
+            }
+        }
+        
+        // Start game with proper initialization
+        function startGame() {
+            // Cancel any existing animation frame
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            
+            // Reset game state
+            initGame();
+            gameStarted = true;
+            gameOver = false;
+            startScreen.style.display = "none";
+            gameOverScreen.style.display = "none";
+            
+            // Play background music if not muted
+            if (!isMuted) {
+                backgroundMusic.play().catch(e => {
+                    console.log("Audio play failed:", e);
+                });
+            }
+            
+            gameLoop();
+        }
+        
+        // Toggle mute function
+        function toggleMute() {
+            isMuted = !isMuted;
+            if (isMuted) {
+                backgroundMusic.pause();
+                muteButton.textContent = "Unmute";
+            } else {
+                if (gameStarted && !gameOver) {
+                    backgroundMusic.play().catch(e => {
+                        console.log("Audio play failed:", e);
+                    });
+                }
+                muteButton.textContent = "Mute";
+            }
+        }
+        
+        // Event listeners
+        startButton.addEventListener("click", startGame);
+        restartButton.addEventListener("click", startGame);
+        muteButton.addEventListener("click", toggleMute);
+        
+        document.addEventListener("keydown", (e) => {
+            if (e.code === "Space") {
+                e.preventDefault();
+                jump();
+            }
+        });
+        
+        canvas.addEventListener("touchstart", (e) => {
+            e.preventDefault();
+            jump();
+        }, { passive: false });
+        
+        canvas.addEventListener("mousedown", (e) => {
+            e.preventDefault();
+            jump();
+        });
+        
+        window.addEventListener("resize", () => {
+            resizeCanvas();
+            if (!gameStarted) {
+                initGame();
+            }
+        });
+        
+        // Initialize the game
+        initGame();
+    </script>
+</body>
+</html>
